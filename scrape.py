@@ -24,21 +24,33 @@ class SweetwaterProduct:
     def __hash__(self) -> int:
         return hash(self.serial)
 
+    def __repr__(self) -> str:
+        return repr(
+            {
+                "name": self.name,
+                "serial": self.serial,
+                "url": self.url,
+                "images": self.images,
+            }
+        )
+
 
 def post_discord(message: str, roles: list = []) -> None:
-    content: str = ""
-    for role in roles:
-        content += f"@{role} "
-    content += f"\n\n{message}"
-    data: dict = {"content": content, "username": "SweetwaterBot"}
+    if CONFIG_DISCORD_WEBHOOK != "":
+        content: str = ""
+        for role in roles:
+            content += f"@{role} "
+        content += f"\n\n{message}"
+        data: dict = {"content": content, "username": "SweetwaterBot"}
 
-    try:
-        requests.post(CONFIG_DISCORD_WEBHOOK, json=data, timeout=HTTP_TIMEOUT_SECONDS)
-    except requests.HTTPError as e:
-
-        raise IOError(
-            f"ERROR: failed to post to discord ({e.response.status_code})"
-        ) from e
+        try:
+            requests.post(
+                CONFIG_DISCORD_WEBHOOK, json=data, timeout=HTTP_TIMEOUT_SECONDS
+            )
+        except requests.HTTPError as e:
+            raise IOError(
+                f"ERROR: failed to post to discord ({e.response.status_code})"
+            ) from e
 
 
 def get_products() -> set:
@@ -48,8 +60,10 @@ def get_products() -> set:
     }
 
     products: set = set()
-    for id in CONFIG_PRODUCT_IDS:
-        url: str = f"https://www.sweetwater.com/webservices_sw/items/detail/{id}?format=serialcompare"
+    for product_id in CONFIG_PRODUCT_IDS:
+        url: str = (
+            f"https://www.sweetwater.com/webservices_sw/items/detail/{product_id}?format=serialcompare"
+        )
 
         try:
             with requests.Session() as session:
@@ -65,8 +79,8 @@ def get_products() -> set:
         except json.JSONDecodeError as e:
             raise IOError("ERROR: Failed to parse product JSON") from e
 
-        name: str = data["productName"]
         try:
+            name: str = data["productName"]
             items: set = set(
                 map(
                     lambda item: SweetwaterProduct(
@@ -75,7 +89,9 @@ def get_products() -> set:
                         url=f'https://www.sweetwater.com{item["serialUrl"]}',
                         images=[
                             item["images"][view]["images"]["750"]["absolutePath"]
-                            for view in ["angle"]  # can also use body, front, back
+                            for view in [
+                                "angle"
+                            ]  # can optionally include body, front, back
                         ],
                     ),
                     data["comparableSerials"],
@@ -105,13 +121,16 @@ def scrape() -> None:
         new_products: set = products - seen_products
 
         for product in sold_products:
-            message: str = f"⚠️Listing Update⚠️\n{product.name} with serial number {product.serial} has been sold."
+            message: str = (
+                f"⚠️Listing Update⚠️\n{product.name} with serial number {product.serial} has been sold."
+            )
+            print(message)
             post_discord(message)
 
         for product in new_products:
             images: str = "\n".join(product.images)
             message: str = (
-                f"❗New Listing Alert❗\n{product.name}\n{product.url}\n\n{images}\n"
+                f"❗New Listing Alert❗\n{product.name}\n{product.url}\n{images}\n"
             )
             print(message)
             post_discord(message, CONFIG_DISCORD_PING_ROLES)
@@ -125,10 +144,16 @@ def scrape() -> None:
 if CONFIG_POST_HEARTBEAT:
     schedule.every().day.at("08:00").do(heartbeat)
 schedule.every(CONFIG_REFRESH_RATE_SECONDS).seconds.do(scrape)
+
 print(
-    f"Starting Sweetwater scrape, with {len(seen_products)} initial products from {len(CONFIG_PRODUCT_IDS)} product IDs\n"
+    f"Starting Sweetwater scrape, with {len(seen_products)} "
+    f"initial products from {len(CONFIG_PRODUCT_IDS)} product ID(s)\n"
 )
-schedule.run_all()
+for product in seen_products:
+    images: str = "\n".join(product.images)
+    message: str = f"{product.name}\n{product.url}\n{images}\n"
+    print(message)
+
 
 while True:
     t: int = schedule.idle_seconds()
